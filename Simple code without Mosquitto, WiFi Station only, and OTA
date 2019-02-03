@@ -1,0 +1,162 @@
+// this version works with Firefox 65.0, 64 bits
+// Code original https://github.com/SwiCago/HeatPump/blob/master/examples/HP_cntrl_esp8266/HP_cntrl_esp8266.ino
+// Tested with Mitsubishi MFZ-KJ25VE / MUFZ-KJ25VE 	 Without WideVane
+	
+
+#include <ESP8266WiFi.h>
+#include <WiFiClient.h>
+#include <ESP8266WebServer.h>
+#include <WiFiUdp.h>
+#include <ArduinoOTA.h>
+#include <HeatPump.h>
+
+
+//************************************ Déclaration des constantes utilisées **********************
+const char* ssid = "YourSSID";
+const char* password = "YourPassword";
+
+const char* html = "<html>\n<head>\n<meta name='viewport' content='width=device-width, initial-scale=2'/>\n"
+                   "<meta http-equiv='refresh' content='_RATE_; url=/'/>\n"
+                   "<style></style>\n"
+                   "<body><h3>Controle de la PAC salon</h3>Temp&eacuterature pi&egravece : _ROOMTEMP_\n&deg;C<form autocomplete='off' method='post' action=''>\n<table>\n<br/>"
+                   "<tr>\n<td>Power:</td>\n<td>\n_POWER_</td>\n</tr>\n"
+                   "<tr>\n<td>Mode :</td>\n<td>\n_MODE_</td>\n</tr>\n"
+                   "<tr>\n<td>Temp :</td>\n<td>\n_TEMP_</td>\n</tr>"
+                   "<tr>\n<td>Fan     :</td>\n<td>\n_FAN_</td>\n</tr>\n"
+                   "<tr>\n<td>Vane  :</td><td>\n_VANE_</td>\n</tr>\n"
+                   //"<tr>\n<td>WideVane:</td>\n<td>\n_WVANE_</td>\n</tr>\n"
+                   "</table>\n<br/><input type='submit' value='Envoyer'/>\n</form>"
+                   "<form><input type='submit' name='CONNECT' value='Reconnexion'/>\n</form>\n"
+                   "</body>\n</html>\n";
+
+
+IPAddress MonIP(192,168,0,5);        //Put your IP if you want a fixed IP (Static)
+IPAddress gateway(192, 168, 0, 1);   // Ip of your Box or Network
+IPAddress subnet(255, 255, 255, 0);
+IPAddress dns(192, 168, 3, 1);
+
+ESP8266WebServer server(80);
+
+HeatPump hp;
+
+//************************************* SETUP ****************************************************
+void setup() {
+  hp.connect(&Serial);
+
+  //On arrete le serveur Wifi qui fonctionne souvent par défaut!!
+  WiFi.softAPdisconnect (true);
+
+  // On passe en mode station, et on se connecte au réseau existant.
+  WiFi.mode(WIFI_STA); 
+  WiFi.config(MonIP,gateway,subnet,dns);
+  WiFi.begin(ssid, password);
+
+  //préparation du mode OTA pour pouvoir modifier le programme par WIFI
+  ArduinoOTA.setHostname("YourOTAHostNamz");
+  ArduinoOTA.setPassword("YourOTAPassWord");
+  ArduinoOTA.begin();
+  
+  // Si un client demande "/" on exécute handle_root
+  server.on("/", handle_root); 
+  
+  server.onNotFound(handleNotFound);
+  server.begin();
+}
+
+//*************************************** Boucle principale **************************************
+void loop() {
+  ArduinoOTA.handle();
+  server.handleClient();
+  hp.sync();
+}
+
+// ************************************** Fonctions et procédures ********************************
+String encodeString(String toEncode) {
+  toEncode.replace("<", "&lt;");
+  toEncode.replace(">", "&gt;");
+  toEncode.replace("|", "&vert;");
+  return toEncode;
+}
+
+String createOptionSelector(String name1, const String values[], int len, String value) {
+  String str = "<select name='" + name1 + "'>\n";
+ 
+  for (int i = 0; i < len; i++) {
+    String encoded = encodeString(values[i]);
+    str += "<option value=\"";
+    str += values[i];
+    str += "\"";
+    str += values[i] == value ? " selected" : "";
+    str += ">";
+    str += encoded;
+    str += "</option>\n";
+  }
+  
+  return str;
+}
+
+void handleNotFound() {
+  server.send ( 200, "text/plain", "Page inexistante !" );
+}
+
+void handle_root() {
+  
+  //int rate = change_states() ? 0 : 20;
+  int rate = change_states() ? 20 : 20;
+  String toSend = html;
+
+  toSend.replace("_RATE_", String(rate));
+  String power[2] = {"OFF", "ON"}; 
+  toSend.replace("_POWER_", createOptionSelector("POWER", power, 2, hp.getPowerSetting()));
+  String mode[5] = {"HEAT", "DRY", "COOL", "FAN", "AUTO"};
+  toSend.replace("_MODE_", createOptionSelector("MODE", mode, 5, hp.getModeSetting()));
+  String temp[16] = {"31", "30", "29", "28", "27", "26", "25", "24", "23", "22", "21", "20", "19", "18", "17", "16"};
+  toSend.replace("_TEMP_", createOptionSelector("TEMP", temp, 16, String(hp.getTemperature()).substring(0,2)));
+  String fan[6] = {"AUTO", "QUIET", "1", "2", "3", "4"};
+  toSend.replace("_FAN_", createOptionSelector("FAN", fan, 6, hp.getFanSpeed()));
+  String vane[7] = {"AUTO", "1", "2", "3", "4", "5", "SWING"};
+  toSend.replace("_VANE_", createOptionSelector("VANE", vane, 7, hp.getVaneSetting()));
+  // String widevane[7] = {"<<", "<", "|", ">", ">>", "<>", "SWING"};                                           // Pas de vanne sur ce modèle de PAC
+  // toSend.replace("_WVANE_", createOptionSelector("WIDEVANE", widevane, 7, hp.getWideVaneSetting()));
+  toSend.replace("_ROOMTEMP_", String(hp.getRoomTemperature()));
+  server.send(200, "text/html", toSend);
+  
+  //server.send(200, "text/plain", "Power, Temp, Fan, Room Temp : " + hp.getPowerSetting()+"," + String(hp.getTemperature())+ "," + String(hp.getTemperature()).substring(0,2)+", "+ hp.getFanSpeed()+", "+String(hp.getRoomTemperature()));
+  
+  delay(100);
+}
+
+bool change_states() {
+  bool updated = false;
+  if (server.hasArg("CONNECT")) {
+    hp.connect(&Serial);
+  }
+  else {
+    if (server.hasArg("POWER")) {
+      hp.setPowerSetting(server.arg("POWER"));
+      updated = true;
+    }
+    if (server.hasArg("MODE")) {
+      hp.setModeSetting(server.arg("MODE"));
+      updated = true;
+    }
+    if (server.hasArg("TEMP")) {
+      hp.setTemperature(server.arg("TEMP").toFloat());
+      updated = true;
+    }
+    if (server.hasArg("FAN")) {
+      hp.setFanSpeed(server.arg("FAN"));
+      updated = true;
+    }
+    if (server.hasArg("VANE")) {
+      hp.setVaneSetting(server.arg("VANE"));
+      updated = true;
+    }
+    if (server.hasArg("DIR")) {
+      hp.setWideVaneSetting(server.arg("WIDEVANE"));
+      updated = true;
+    }
+    hp.update(); 
+  }
+  return updated;
+}
