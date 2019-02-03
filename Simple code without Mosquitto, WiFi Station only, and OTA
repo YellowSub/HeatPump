@@ -31,9 +31,9 @@ const char* html = "<html>\n<head>\n<meta name='viewport' content='width=device-
 
 
 IPAddress MonIP(192,168,0,5);        //Put your IP if you want a fixed IP (Static)
-IPAddress gateway(192, 168, 0, 1);   // Ip of your Box or Network
+IPAddress gateway(192, 168, 0, 1);   // Ip of your Box or Network you want to connect to
 IPAddress subnet(255, 255, 255, 0);
-IPAddress dns(192, 168, 3, 1);
+IPAddress dns(192, 168, 0, 1);	     //IP of your DNS
 
 ESP8266WebServer server(80);
 
